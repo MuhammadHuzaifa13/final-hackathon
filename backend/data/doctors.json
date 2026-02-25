@@ -1,0 +1,57 @@
+[
+  {
+    "_id": "doc1",
+    "name": "Dr. Sarah Wilson",
+    "specialization": "Cardiologist",
+    "email": "sarah.wilson@medicare.com",
+    "phone": "123-456-7890",
+    "availableDays": [
+      "Monday",
+      "Wednesday",
+      "Friday"
+    ],
+    "availableTimeSlots": [
+      {
+        "start": "09:00",
+        "end": "17:00"
+      }
+    ]
+  },
+  {
+    "_id": "doc2",
+    "name": "Dr. James Miller",
+    "specialization": "Dermatologist",
+    "email": "james.miller@medicare.com",
+    "phone": "123-456-7891",
+    "availableDays": [
+      "Tuesday",
+      "Thursday"
+    ],
+    "availableTimeSlots": [
+      {
+        "start": "10:00",
+        "end": "16:00"
+      }
+    ]
+  },
+  {
+    "_id": "doc3",
+    "name": "Dr. Emily Chen",
+    "specialization": "Pediatrician",
+    "email": "emily.chen@medicare.com",
+    "phone": "123-456-7892",
+    "availableDays": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "availableTimeSlots": [
+      {
+        "start": "08:00",
+        "end": "12:00"
+      }
+    ]
+  }
+]

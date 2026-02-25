@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# JSON DB data
+backend/data/*.json
+!backend/data/doctors.json
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Test files
+backend/test_express.js

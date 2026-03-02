@@ -1,4 +1,4 @@
-const db = require('../utils/db');
+const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
@@ -13,6 +13,8 @@ const generateToken = (userId) => {
 // @route   POST /api/auth/signup
 // @access  Public
 const signup = async (req, res) => {
+  console.log('--- SIGNUP REQUEST RECEIVED ---');
+  console.log('Body:', req.body);
   try {
     const { name, email, password, phone } = req.body;
 
@@ -25,8 +27,7 @@ const signup = async (req, res) => {
     }
 
     // Check if user already exists
-    const users = await db.read('users');
-    const existingUser = users.find(u => u.email === email.toLowerCase());
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -34,39 +35,38 @@ const signup = async (req, res) => {
       });
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
     // Create new user
-    const user = await db.create('users', {
+    const user = new User({
       name,
       email: email.toLowerCase(),
-      password: hashedPassword,
+      password, // Password hashing is handled in User model pre-save hook
       phone: phone || '',
       address: ''
     });
 
+    await user.save();
+
     // Generate token
     const token = generateToken(user._id);
 
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    // Remove password from response (SAFETIER)
+    const userObj = user.toObject();
+    delete userObj.password;
 
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
       data: {
-        user: userWithoutPassword,
+        user: userObj,
         token
       }
     });
   } catch (error) {
-    console.error('Signup error:', error);
+    console.error('CRITICAL SIGNUP ERROR:', error);
     res.status(500).json({
       success: false,
       message: 'Server error during signup',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message
     });
   }
 };
@@ -87,8 +87,7 @@ const login = async (req, res) => {
     }
 
     // Find user by email
-    const users = await db.read('users');
-    const user = users.find(u => u.email === email.toLowerCase());
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -97,7 +96,7 @@ const login = async (req, res) => {
     }
 
     // Check password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -109,13 +108,14 @@ const login = async (req, res) => {
     const token = generateToken(user._id);
 
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    const userObj = user.toObject();
+    delete userObj.password;
 
     res.status(200).json({
       success: true,
       message: 'Login successful',
       data: {
-        user: userWithoutPassword,
+        user: userObj,
         token
       }
     });
@@ -134,8 +134,7 @@ const login = async (req, res) => {
 // @access  Private
 const getMe = async (req, res) => {
   try {
-    const users = await db.read('users');
-    const user = users.find(u => u._id === req.user.id);
+    const user = await User.findById(req.user.id).select('-password');
 
     if (!user) {
       return res.status(404).json({
@@ -144,12 +143,10 @@ const getMe = async (req, res) => {
       });
     }
 
-    const { password: _, ...userWithoutPassword } = user;
-
     res.status(200).json({
       success: true,
       data: {
-        user: userWithoutPassword
+        user: user.toObject()
       }
     });
   } catch (error) {

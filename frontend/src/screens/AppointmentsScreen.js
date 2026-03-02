@@ -8,8 +8,9 @@ import {
   StatusBar,
   RefreshControl,
   Alert,
+  Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { MaterialIcons as Icon } from '@expo/vector-icons';
 import { appointmentService } from '../services';
 import { dateUtils } from '../utils';
 import { COLORS, ROUTES, APPOINTMENT_STATUS } from '../constants';
@@ -18,6 +19,8 @@ const AppointmentsScreen = ({ navigation }) => {
   const [upcomingAppointments, setUpcomingAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [confirmingId, setConfirmingId] = useState(null);
 
   useEffect(() => {
     loadAppointments();
@@ -26,7 +29,8 @@ const AppointmentsScreen = ({ navigation }) => {
   const loadAppointments = async () => {
     try {
       const response = await appointmentService.getUpcomingAppointments();
-      setUpcomingAppointments(response.data.appointments);
+      const appointments = response?.data?.appointments || response?.appointments || [];
+      setUpcomingAppointments(appointments);
     } catch (error) {
       console.error('Error loading appointments:', error);
       Alert.alert('Error', 'Failed to load appointments');
@@ -50,20 +54,57 @@ const AppointmentsScreen = ({ navigation }) => {
   };
 
   const handleCancelAppointment = async (appointmentId) => {
+    if (cancellingId || confirmingId) return;
+
+    if (Platform.OS === 'web') {
+      try {
+        setConfirmingId(appointmentId);
+        // Use a small delay to ensure the UI has settled
+        setTimeout(async () => {
+          const confirmed = window.confirm('Are you sure you want to cancel this appointment?');
+          setConfirmingId(null);
+
+          if (confirmed) {
+            try {
+              setCancellingId(appointmentId);
+              console.log('Cancelling appointment:', appointmentId);
+              await appointmentService.cancelAppointment(appointmentId);
+              await loadAppointments();
+              alert('Appointment cancelled successfully');
+            } catch (error) {
+              console.error('Cancel error:', error.response?.data || error.message);
+              alert('Failed to cancel appointment: ' + (error.response?.data?.message || 'Network error'));
+            } finally {
+              setCancellingId(null);
+            }
+          }
+        }, 50);
+      } catch (e) {
+        setConfirmingId(null);
+      }
+      return;
+    }
+
     Alert.alert(
       'Cancel Appointment',
       'Are you sure you want to cancel this appointment?',
       [
-        { text: 'No', style: 'cancel' },
+        { text: 'No', style: 'cancel', onPress: () => setConfirmingId(null) },
         {
           text: 'Yes',
           onPress: async () => {
             try {
+              setConfirmingId(null);
+              setCancellingId(appointmentId);
+              console.log('Cancelling appointment (Native):', appointmentId);
               await appointmentService.cancelAppointment(appointmentId);
-              loadAppointments();
+              await loadAppointments();
               Alert.alert('Success', 'Appointment cancelled successfully');
             } catch (error) {
-              Alert.alert('Error', 'Failed to cancel appointment');
+              console.error('Cancel error (Native):', error.response?.data || error.message);
+              Alert.alert('Error', 'Failed to cancel appointment: ' + (error.response?.data?.message || 'Network error'));
+            } finally {
+              setCancellingId(null);
             }
           },
         },
@@ -112,12 +153,15 @@ const AppointmentsScreen = ({ navigation }) => {
           </Text>
         )}
 
-        {appointment.status === APPOINTMENT_STATUS.CONFIRMED && (
+        {(appointment.status === APPOINTMENT_STATUS.CONFIRMED || appointment.status === APPOINTMENT_STATUS.PENDING) && (
           <TouchableOpacity
-            style={styles.cancelButton}
+            style={[styles.cancelButton, (cancellingId === appointment._id || confirmingId === appointment._id) && { opacity: 0.5 }]}
             onPress={() => handleCancelAppointment(appointment._id)}
+            disabled={cancellingId !== null || confirmingId !== null}
           >
-            <Text style={styles.cancelButtonText}>Cancel Appointment</Text>
+            <Text style={styles.cancelButtonText}>
+              {cancellingId === appointment._id ? 'Processing...' : confirmingId === appointment._id ? 'Confirming...' : 'Cancel Appointment'}
+            </Text>
           </TouchableOpacity>
         )}
       </View>
@@ -146,7 +190,20 @@ const AppointmentsScreen = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      Platform.OS === 'web' && {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: '100vh',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      }
+    ]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
       <View style={styles.header}>
@@ -220,6 +277,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 20 : 40,
   },
   appointmentCard: {
     backgroundColor: COLORS.surface,

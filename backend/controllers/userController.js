@@ -1,4 +1,4 @@
-const db = require('../utils/db');
+const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 
 // @desc    Get user profile
@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 // @access  Private
 const getProfile = async (req, res) => {
   try {
-    const user = await db.findOne('users', { _id: req.user.id });
+    const user = await User.findById(req.user.id).select('-password');
 
     if (!user) {
       return res.status(404).json({
@@ -15,12 +15,10 @@ const getProfile = async (req, res) => {
       });
     }
 
-    const { password: _, ...userWithoutPassword } = user;
-
     res.status(200).json({
       success: true,
       data: {
-        user: userWithoutPassword
+        user
       }
     });
   } catch (error) {
@@ -40,8 +38,7 @@ const updateProfile = async (req, res) => {
   try {
     const { name, phone, address } = req.body;
 
-    // Find user
-    const user = await db.findOne('users', { _id: req.user.id });
+    const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -49,21 +46,23 @@ const updateProfile = async (req, res) => {
       });
     }
 
-    // Update fields
-    const update = {};
-    if (name) update.name = name;
-    if (phone !== undefined) update.phone = phone;
-    if (address !== undefined) update.address = address;
+    if (name) user.name = name;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
 
-    const updated = await db.findByIdAndUpdate('users', req.user.id, update);
-
-    const { password: _, ...userWithoutPassword } = updated;
+    await user.save();
 
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
       data: {
-        user: userWithoutPassword
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          address: user.address
+        }
       }
     });
   } catch (error) {
@@ -83,15 +82,7 @@ const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
-    // Validate input
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide current password and new password'
-      });
-    }
-
-    const user = await db.findOne('users', { _id: req.user.id });
+    const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -100,7 +91,7 @@ const changePassword = async (req, res) => {
     }
 
     // Check current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isCurrentPasswordValid = await user.comparePassword(currentPassword);
     if (!isCurrentPasswordValid) {
       return res.status(400).json({
         success: false,
@@ -108,12 +99,9 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // Hash new password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
     // Update password
-    await db.findByIdAndUpdate('users', req.user.id, { password: hashedPassword });
+    user.password = newPassword; // Hashed in pre-save hook
+    await user.save();
 
     res.status(200).json({
       success: true,
@@ -135,7 +123,7 @@ const changePassword = async (req, res) => {
 const deleteAccount = async (req, res) => {
   try {
     const { password } = req.body;
-    const user = await db.findOne('users', { _id: req.user.id });
+    const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -144,7 +132,7 @@ const deleteAccount = async (req, res) => {
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(400).json({
         success: false,
@@ -153,7 +141,7 @@ const deleteAccount = async (req, res) => {
     }
 
     // Delete user
-    await db.findByIdAndDelete('users', req.user.id);
+    await User.findByIdAndDelete(req.user.id);
 
     res.status(200).json({
       success: true,

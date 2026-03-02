@@ -1,0 +1,17 @@
+﻿Starting project at C:\Users\user\Desktop\final hackathon\frontend
+ΓÇ║ Port 8085 is being used by another process
+node.exe : Input is required, but 'npx expo' is in 
+non-interactive mode.
+At line:1 char:1
++ & "C:\nvm4w\nodejs/node.exe" 
+"C:\Users\user\AppData\Roaming\npm/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Input is 
+    requir...teractive mode.:String) [], RemoteExcep  
+  tion
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Required input:
+> Use port 8086 instead?
+ΓÇ║ Skipping dev server

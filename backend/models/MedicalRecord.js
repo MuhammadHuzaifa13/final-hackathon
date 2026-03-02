@@ -49,9 +49,9 @@ const medicalRecordSchema = new mongoose.Schema({
 });
 
 // Update the updatedAt field on save
-medicalRecordSchema.pre('save', function(next) {
+// Update the updatedAt field on save
+medicalRecordSchema.pre('save', async function () {
   this.updatedAt = Date.now();
-  next();
 });
 
 module.exports = mongoose.model('MedicalRecord', medicalRecordSchema);

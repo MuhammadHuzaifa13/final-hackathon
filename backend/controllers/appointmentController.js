@@ -1,4 +1,5 @@
-const db = require('../utils/db');
+const Appointment = require('../models/Appointment');
+const Doctor = require('../models/Doctor');
 
 // @desc    Book a new appointment
 // @route   POST /api/appointments/book
@@ -16,8 +17,8 @@ const bookAppointment = async (req, res) => {
     }
 
     // Check if doctor exists and is active
-    const doctor = await db.findOne('doctors', { _id: doctorId });
-    if (!doctor || !doctor.isActive) {
+    const doctor = await Doctor.findOne({ _id: doctorId, isActive: true });
+    if (!doctor) {
       return res.status(404).json({
         success: false,
         message: 'Doctor not found or not available'
@@ -34,7 +35,8 @@ const bookAppointment = async (req, res) => {
     }
 
     // Check if the time is within doctor's available time slots
-    const dayOfWeek = appointmentDate.toLocaleDateString('en-US', { weekday: 'long' });
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = days[appointmentDate.getDay()];
     if (!doctor.availableDays.includes(dayOfWeek)) {
       return res.status(400).json({
         success: false,
@@ -43,13 +45,12 @@ const bookAppointment = async (req, res) => {
     }
 
     // Check for appointment clash
-    const appointments = await db.read('appointments');
-    const clash = appointments.find(a =>
-      a.doctor === doctorId &&
-      a.date === date &&
-      a.time === time &&
-      ['confirmed', 'pending'].includes(a.status)
-    );
+    const clash = await Appointment.findOne({
+      doctor: doctorId,
+      date: new Date(date),
+      time: time,
+      status: { $in: ['confirmed', 'pending'] }
+    });
 
     if (clash) {
       return res.status(409).json({
@@ -59,26 +60,19 @@ const bookAppointment = async (req, res) => {
     }
 
     // Create new appointment
-    const appointment = await db.create('appointments', {
+    const appointment = new Appointment({
       user: req.user.id,
       doctor: doctorId,
-      date,
+      date: new Date(date),
       time,
       reason: reason || '',
-      status: 'pending'
+      status: 'confirmed' // Default to confirmed for hackathon simplicity
     });
 
-    // Manually "populate" doctor details for the response
-    const populatedAppointment = {
-      ...appointment,
-      doctor: {
-        _id: doctor._id,
-        name: doctor.name,
-        specialization: doctor.specialization,
-        email: doctor.email,
-        phone: doctor.phone
-      }
-    };
+    await appointment.save();
+
+    // Populate doctor details
+    const populatedAppointment = await Appointment.findById(appointment._id).populate('doctor', 'name specialization email phone');
 
     res.status(201).json({
       success: true,
@@ -102,32 +96,19 @@ const bookAppointment = async (req, res) => {
 // @access  Private
 const getUpcomingAppointments = async (req, res) => {
   try {
-    const appointments = await db.find('appointments', { user: req.user.id });
-    const doctors = await db.read('doctors');
-
-    const currentDate = new Date();
-
-    // Manual populate and filter
-    const upcoming = appointments
-      .filter(a => {
-        const appointmentDateTime = new Date(`${a.date}T${a.time}`);
-        return appointmentDateTime >= currentDate && ['confirmed', 'pending'].includes(a.status);
-      })
-      .map(a => ({
-        ...a,
-        doctor: doctors.find(d => d._id === a.doctor)
-      }))
-      .sort((a, b) => {
-        const dateA = new Date(`${a.date}T${a.time}`);
-        const dateB = new Date(`${b.date}T${b.time}`);
-        return dateA - dateB;
-      });
+    const appointments = await Appointment.find({
+      user: req.user.id,
+      date: { $gte: new Date().setHours(0, 0, 0, 0) },
+      status: { $in: ['confirmed', 'pending'] }
+    })
+      .populate('doctor', 'name specialization email phone')
+      .sort({ date: 1, time: 1 });
 
     res.status(200).json({
       success: true,
       data: {
-        appointments: upcoming,
-        count: upcoming.length
+        appointments,
+        count: appointments.length
       }
     });
   } catch (error) {
@@ -145,31 +126,21 @@ const getUpcomingAppointments = async (req, res) => {
 // @access  Private
 const getAppointmentHistory = async (req, res) => {
   try {
-    const appointments = await db.find('appointments', { user: req.user.id });
-    const doctors = await db.read('doctors');
-
-    const currentDate = new Date();
-
-    const history = appointments
-      .filter(a => {
-        const appointmentDateTime = new Date(`${a.date}T${a.time}`);
-        return appointmentDateTime < currentDate || ['completed', 'cancelled'].includes(a.status);
-      })
-      .map(a => ({
-        ...a,
-        doctor: doctors.find(d => d._id === a.doctor)
-      }))
-      .sort((a, b) => {
-        const dateA = new Date(`${a.date}T${a.time}`);
-        const dateB = new Date(`${b.date}T${b.time}`);
-        return dateB - dateA; // Sort descending
-      });
+    const appointments = await Appointment.find({
+      user: req.user.id,
+      $or: [
+        { date: { $lt: new Date().setHours(0, 0, 0, 0) } },
+        { status: { $in: ['completed', 'cancelled'] } }
+      ]
+    })
+      .populate('doctor', 'name specialization email phone')
+      .sort({ date: -1, time: -1 });
 
     res.status(200).json({
       success: true,
       data: {
-        appointments: history,
-        count: history.length
+        appointments,
+        count: appointments.length
       }
     });
   } catch (error) {
@@ -187,60 +158,26 @@ const getAppointmentHistory = async (req, res) => {
 // @access  Private
 const cancelAppointment = async (req, res) => {
   try {
-    const appointmentId = req.params.id;
-    const appointment = await db.findOne('appointments', { _id: appointmentId });
+    console.log(`Attempting to cancel appointment: ${req.params.id} for user: ${req.user.id}`);
 
-    if (!appointment) {
+    const deletedAppointment = await Appointment.findOneAndDelete(
+      { _id: req.params.id, user: req.user.id }
+    ).populate('doctor', 'name specialization email phone');
+
+    console.log('Delete result:', deletedAppointment ? 'Success' : 'NotFound/NoMatch');
+
+    if (!deletedAppointment) {
       return res.status(404).json({
         success: false,
         message: 'Appointment not found'
       });
     }
 
-    // Check if the appointment belongs to the current user
-    if (appointment.user.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to cancel this appointment'
-      });
-    }
-
-    // Check if appointment can be cancelled (only if it's not in the past)
-    const appointmentDateTime = new Date(`${appointment.date}T${appointment.time}`);
-    if (appointmentDateTime <= new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot cancel past appointments'
-      });
-    }
-
-    if (appointment.status === 'cancelled') {
-      return res.status(400).json({
-        success: false,
-        message: 'Appointment is already cancelled'
-      });
-    }
-
-    const updatedAppointment = await db.findByIdAndUpdate('appointments', appointmentId, { status: 'cancelled' });
-
-    // Manually "populate" doctor details for the response
-    const doctor = await db.findOne('doctors', { _id: updatedAppointment.doctor });
-    const populatedAppointment = {
-      ...updatedAppointment,
-      doctor: doctor ? {
-        _id: doctor._id,
-        name: doctor.name,
-        specialization: doctor.specialization,
-        email: doctor.email,
-        phone: doctor.phone
-      } : null
-    };
-
     res.status(200).json({
       success: true,
-      message: 'Appointment cancelled successfully',
+      message: 'Appointment deleted successfully',
       data: {
-        appointment: populatedAppointment
+        appointment: deletedAppointment
       }
     });
   } catch (error) {
@@ -258,24 +195,15 @@ const cancelAppointment = async (req, res) => {
 // @access  Private
 const getAvailableDoctors = async (req, res) => {
   try {
-    const doctors = await db.find('doctors', { isActive: true });
-
-    // Select specific fields for response
-    const filteredDoctors = doctors.map(doctor => ({
-      _id: doctor._id,
-      name: doctor.name,
-      specialization: doctor.specialization,
-      email: doctor.email,
-      phone: doctor.phone,
-      availableDays: doctor.availableDays,
-      availableTimeSlots: doctor.availableTimeSlots
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    const doctors = await Doctor.find({ isActive: true })
+      .select('name specialization email phone availableDays availableTimeSlots')
+      .sort({ name: 1 });
 
     res.status(200).json({
       success: true,
       data: {
-        doctors: filteredDoctors,
-        count: filteredDoctors.length
+        doctors,
+        count: doctors.length
       }
     });
   } catch (error) {
@@ -296,7 +224,7 @@ const getAvailableSlots = async (req, res) => {
     const { doctorId, date } = req.params;
 
     // Validate doctor
-    const doctor = await db.findOne('doctors', { _id: doctorId });
+    const doctor = await Doctor.findById(doctorId);
     if (!doctor || !doctor.isActive) {
       return res.status(404).json({
         success: false,
@@ -304,9 +232,10 @@ const getAvailableSlots = async (req, res) => {
       });
     }
 
-    // Parse date
+    // Parse date and get day of week in English
     const appointmentDate = new Date(date);
-    const dayOfWeek = appointmentDate.toLocaleDateString('en-US', { weekday: 'long' });
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOfWeek = days[appointmentDate.getDay()];
 
     // Check if doctor is available on this day
     if (!doctor.availableDays.includes(dayOfWeek)) {
@@ -317,14 +246,13 @@ const getAvailableSlots = async (req, res) => {
     }
 
     // Get all booked slots for this doctor on this date
-    const allAppointments = await db.read('appointments');
-    const bookedTimes = allAppointments
-      .filter(apt =>
-        apt.doctor === doctorId &&
-        apt.date === date &&
-        ['confirmed', 'pending'].includes(apt.status)
-      )
-      .map(apt => apt.time);
+    const bookedAppointments = await Appointment.find({
+      doctor: doctorId,
+      date: new Date(date),
+      status: { $in: ['confirmed', 'pending'] }
+    });
+
+    const bookedTimes = bookedAppointments.map(apt => apt.time);
 
     // Generate all possible time slots (30-minute intervals)
     const allSlots = [];

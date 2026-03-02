@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const db = require('../utils/db');
+const User = require('../models/User');
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -19,7 +19,7 @@ const authMiddleware = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Get user from database
-    const user = await db.findOne('users', { _id: decoded.id });
+    const user = await User.findById(decoded.id);
 
     if (!user) {
       return res.status(401).json({
@@ -29,8 +29,9 @@ const authMiddleware = async (req, res, next) => {
     }
 
     // Add user to request object (excluding password)
-    const { password, ...userWithoutPassword } = user;
-    req.user = userWithoutPassword;
+    const userObj = user.toObject();
+    delete userObj.password;
+    req.user = userObj;
     req.user.id = user._id; // Ensure req.user.id is available for controllers
     next();
   } catch (error) {

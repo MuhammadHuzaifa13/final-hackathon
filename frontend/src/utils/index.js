@@ -52,10 +52,10 @@ export const storage = {
 // Date formatting utilities
 export const dateUtils = {
   formatDate: (date) => {
-    const options = { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    const options = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     };
     return new Date(date).toLocaleDateString(undefined, options);
   },
@@ -73,7 +73,7 @@ export const dateUtils = {
     const [hours, minutes] = time.split(':');
     dateObj.setHours(parseInt(hours));
     dateObj.setMinutes(parseInt(minutes));
-    
+
     return dateObj.toLocaleString(undefined, {
       weekday: 'short',
       year: 'numeric',
@@ -139,4 +139,14 @@ export const errorHandler = {
       console.error('Error:', message);
     }
   },
+};
+
+// Data normalization utilities
+export const dataUtils = {
+  unwrapUser: (user) => {
+    if (!user) return null;
+    // If it's the Mongoose structure {$__: ..., _doc: {...}}
+    if (user._doc) return user._doc;
+    return user;
+  }
 };

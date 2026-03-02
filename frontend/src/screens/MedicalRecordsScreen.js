@@ -1,41 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  SafeAreaView,
   StatusBar,
+  ActivityIndicator,
+  FlatList,
   Alert,
+  Platform,
   TextInput,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
-import Modal from 'react-native-modal';
+import { MaterialIcons as Icon } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import { recordService } from '../services';
-import { COLORS, RECORD_TYPES } from '../constants';
+import { COLORS, SIZES, RECORD_TYPES } from '../constants';
 
 const MedicalRecordsScreen = ({ navigation }) => {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedType, setSelectedType] = useState('all');
-  const [isModalVisible, setModalVisible] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
   const [newRecord, setNewRecord] = useState({
     title: '',
     description: '',
-    recordType: RECORD_TYPES.LAB_RESULT,
+    recordType: 'prescription' // Lowercase to match backend enum
   });
   const [submitting, setSubmitting] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [viewModalVisible, setViewModalVisible] = useState(false);
+
+  // Focus management for Web
+  const screenRef = useRef(null);
 
   useEffect(() => {
     loadRecords();
-  }, [selectedType]);
+
+    // Force focus on mount for Web
+    if (Platform.OS === 'web' && screenRef.current) {
+      const timer = setTimeout(() => {
+        screenRef.current.focus?.();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const loadRecords = async () => {
     try {
       setLoading(true);
-      const params = selectedType !== 'all' ? { type: selectedType } : {};
-      const response = await recordService.getRecords(params);
-      setRecords(response.data.records);
+      const response = await recordService.getRecords();
+      const recordsData = response.records || response.data?.records || response || [];
+      setRecords(recordsData);
     } catch (error) {
       console.error('Error loading records:', error);
       Alert.alert('Error', 'Failed to load medical records');
@@ -44,281 +61,266 @@ const MedicalRecordsScreen = ({ navigation }) => {
     }
   };
 
-  const handleAddRecord = () => {
-    setModalVisible(true);
-  };
-
   const handleCreateRecord = async () => {
-    if (!newRecord.title || !newRecord.description) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!newRecord.title.trim() || !newRecord.description.trim()) {
+      Alert.alert('Missing Info', 'Please fill in required fields');
       return;
     }
 
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-      await recordService.createRecord(newRecord);
+      console.log('--- ATTEMPTING TO CREATE RECORD ---');
+      console.log('PAYLOAD:', JSON.stringify(newRecord, null, 2));
+
+      const response = await recordService.createRecord(newRecord);
+
+      console.log('RESPONSE:', JSON.stringify(response, null, 2));
+      console.log('--- RECORD CREATED SUCCESSFULLY ---');
+
       setModalVisible(false);
-      setNewRecord({
-        title: '',
-        description: '',
-        recordType: RECORD_TYPES.LAB_RESULT,
-      });
+      setNewRecord({ title: '', description: '', recordType: 'prescription' });
       loadRecords();
-      Alert.alert('Success', 'Medical record added successfully');
     } catch (error) {
-      console.error('Error creating record:', error);
+      console.error('Error adding record:', error);
+      if (error.response) {
+        console.error('API Error Response:', JSON.stringify(error.response.data, null, 2));
+      }
       Alert.alert('Error', 'Failed to add medical record');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleRecordPress = (record) => {
-    Alert.alert(
-      record.title,
-      `Type: ${record.type.replace('_', ' ')}\n\n${record.description}`,
-      [
-        { text: 'Close', style: 'cancel' },
-        { text: 'View Details', onPress: () => console.log('View details') },
-      ]
-    );
-  };
-
-  const getRecordTypeIcon = (type) => {
-    const icons = {
-      [RECORD_TYPES.LAB_RESULT]: 'science',
-      [RECORD_TYPES.PRESCRIPTION]: 'medication',
-      [RECORD_TYPES.DIAGNOSIS]: 'local_hospital',
-      [RECORD_TYPES.IMAGING]: 'image',
-      [RECORD_TYPES.VACCINATION]: 'vaccines',
-      [RECORD_TYPES.OTHER]: 'description',
-    };
-    return icons[type] || 'description';
-  };
-
-  const getRecordTypeColor = (type) => {
-    const colors = {
-      [RECORD_TYPES.LAB_RESULT]: COLORS.info,
-      [RECORD_TYPES.PRESCRIPTION]: COLORS.secondary,
-      [RECORD_TYPES.DIAGNOSIS]: COLORS.error,
-      [RECORD_TYPES.IMAGING]: COLORS.warning,
-      [RECORD_TYPES.VACCINATION]: COLORS.success,
-      [RECORD_TYPES.OTHER]: COLORS.textSecondary,
-    };
-    return colors[type] || COLORS.textSecondary;
-  };
-
-  const renderFilterButtons = () => {
-    const types = [
-      { key: 'all', label: 'All' },
-      { key: RECORD_TYPES.LAB_RESULT, label: 'Lab Results' },
-      { key: RECORD_TYPES.PRESCRIPTION, label: 'Prescriptions' },
-      { key: RECORD_TYPES.DIAGNOSIS, label: 'Diagnosis' },
-      { key: RECORD_TYPES.IMAGING, label: 'Imaging' },
-      { key: RECORD_TYPES.VACCINATION, label: 'Vaccinations' },
-      { key: RECORD_TYPES.OTHER, label: 'Other' },
-    ];
+  const renderRecordItem = ({ item }) => {
+    const recordTypeLabel = item.recordType ?
+      item.recordType.charAt(0).toUpperCase() + item.recordType.slice(1).replace('_', ' ') :
+      'Medical Record';
 
     return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterContainer}
-        contentContainerStyle={styles.filterContent}
-      >
-        {types.map((type) => (
-          <TouchableOpacity
-            key={type.key}
-            style={[
-              styles.filterButton,
-              selectedType === type.key && styles.filterButtonActive,
-            ]}
-            onPress={() => setSelectedType(type.key)}
-          >
-            <Text
-              style={[
-                styles.filterButtonText,
-                selectedType === type.key && styles.filterButtonTextActive,
-              ]}
-            >
-              {type.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    );
-  };
-
-  const renderRecordCard = (record) => {
-    const typeColor = getRecordTypeColor(record.recordType);
-    const icon = getRecordTypeIcon(record.recordType);
-
-    return (
-      <TouchableOpacity
-        key={record._id}
-        style={styles.recordCard}
-        onPress={() => handleRecordPress(record)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.recordHeader}>
-          <View style={[styles.recordIcon, { backgroundColor: typeColor + '20' }]}>
-            <Icon name={icon} size={24} color={typeColor} />
-          </View>
-          <View style={styles.recordInfo}>
-            <Text style={styles.recordTitle} numberOfLines={1}>
-              {record.title}
-            </Text>
-            <Text style={styles.recordType}>
-              {record.recordType.replace('_', ' ').charAt(0).toUpperCase() +
-                record.recordType.slice(1)}
-            </Text>
-          </View>
-          <Icon name="chevron-right" size={20} color={COLORS.textSecondary} />
+      <Animated.View entering={FadeInUp} style={styles.recordCard}>
+        <View style={[styles.recordIcon, { backgroundColor: COLORS.primaryLight }]}>
+          <Icon
+            name={item.recordType === 'prescription' ? 'medication' : 'description'}
+            size={24}
+            color={COLORS.primary}
+          />
         </View>
-
-        <Text style={styles.recordDescription} numberOfLines={2}>
-          {record.description}
-        </Text>
-
-        <View style={styles.recordFooter}>
-          <Text style={styles.recordDate}>
-            {new Date(record.createdAt).toLocaleDateString()}
+        <View style={styles.recordInfo}>
+          <Text style={styles.recordTitle} numberOfLines={1}>{item.title || item.fileName}</Text>
+          <Text style={styles.recordTypeTag}>{recordTypeLabel}</Text>
+          <Text style={styles.recordDescriptionSnippet} numberOfLines={1}>
+            {item.description || 'No description provided'}
           </Text>
-          {record.fileName && (
-            <View style={styles.fileInfo}>
-              <Icon name="attach-file" size={16} color={COLORS.textSecondary} />
-              <Text style={styles.fileName} numberOfLines={1}>
-                {record.fileName}
-              </Text>
-            </View>
-          )}
         </View>
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.viewButton}
+          onPress={() => {
+            setSelectedRecord(item);
+            setViewModalVisible(true);
+          }}
+        >
+          <Icon name="visibility" size={22} color={COLORS.primary} />
+        </TouchableOpacity>
+      </Animated.View>
     );
   };
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <Icon name="folder-open" size={64} color={COLORS.textSecondary} />
-      <Text style={styles.emptyStateTitle}>No Medical Records</Text>
-      <Text style={styles.emptyStateText}>
-        You haven't added any medical records yet. Start by adding your first record.
-      </Text>
-      <TouchableOpacity style={styles.addButton} onPress={handleAddRecord}>
-        <Text style={styles.addButtonText}>Add Your First Record</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text>Loading medical records...</Text>
-      </View>
-    );
-  }
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+    <SafeAreaView
+      style={[
+        styles.container,
+        Platform.OS === 'web' && {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: '100vh',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }
+      ]}
+      ref={screenRef}
+      focusable={true}
+      accessible={true}
+    >
+      <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Medical Records</Text>
-        <TouchableOpacity style={styles.addButtonHeader} onPress={handleAddRecord}>
-          <Icon name="add" size={20} color={COLORS.surface} />
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => setModalVisible(true)}
+        >
+          <Icon name="add" size={24} color={COLORS.white} />
         </TouchableOpacity>
       </View>
 
-      {renderFilterButtons()}
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {records.length > 0
-          ? records.map(renderRecordCard)
-          : renderEmptyState()}
-      </ScrollView>
-
-      {/* Add Record Modal */}
-      <Modal
-        isVisible={isModalVisible}
-        onBackdropPress={() => setModalVisible(false)}
-        style={styles.modal}
-        avoidKeyboard
-      >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add New Record</Text>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Icon name="close" size={24} color={COLORS.text} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.form}>
-            <Text style={styles.label}>Title</Text>
-            <View style={styles.inputContainer}>
-              <Icon name="title" size={20} color={COLORS.textSecondary} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., Blood Test Report"
-                value={newRecord.title}
-                onChangeText={(text) => setNewRecord({ ...newRecord, title: text })}
-              />
+      {loading && !records.length ? (
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={records}
+          renderItem={renderRecordItem}
+          keyExtractor={item => item._id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Icon name="folder-off" size={60} color={COLORS.border} />
+              <Text style={styles.emptyText}>No records found</Text>
+              <Text style={styles.emptySubtext}>Upload your first medical record to keep it safe.</Text>
             </View>
+          }
+        />
+      )}
 
-            <Text style={styles.label}>Record Type</Text>
+      {modalVisible && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add Medical Record</Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Record Title"
+              value={newRecord.title}
+              onChangeText={(text) => setNewRecord({ ...newRecord, title: text })}
+              autoFocus
+            />
+
+            <TextInput
+              style={[styles.modalInput, { height: 100, textAlignVertical: 'top' }]}
+              placeholder="Description (e.g. Dosage, Instructions)"
+              value={newRecord.description}
+              onChangeText={(text) => setNewRecord({ ...newRecord, description: text })}
+              multiline
+            />
+
+            <Text style={styles.modalLabel}>Record Type</Text>
             <View style={styles.typeSelector}>
-              {Object.values(RECORD_TYPES).map((type) => (
+              {['prescription', 'lab_result', 'diagnosis', 'other'].map((type) => (
                 <TouchableOpacity
                   key={type}
                   style={[
                     styles.typeOption,
-                    newRecord.recordType === type && styles.typeOptionActive,
+                    newRecord.recordType === type && styles.selectedTypeOption
                   ]}
                   onPress={() => setNewRecord({ ...newRecord, recordType: type })}
                 >
-                  <Text
-                    style={[
-                      styles.typeOptionText,
-                      newRecord.recordType === type && styles.typeOptionTextActive,
-                    ]}
-                  >
-                    {type.replace('_', ' ').charAt(0).toUpperCase() + type.slice(1)}
+                  <Text style={[
+                    styles.typeOptionText,
+                    newRecord.recordType === type && styles.selectedTypeOptionText
+                  ]}>
+                    {type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={styles.label}>Description</Text>
-            <View style={[styles.inputContainer, styles.textAreaContainer]}>
-              <TextInput
-                style={styles.textArea}
-                placeholder="Enter details about this record..."
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                value={newRecord.description}
-                onChangeText={(text) => setNewRecord({ ...newRecord, description: text })}
-              />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setModalVisible(false)}
+                disabled={submitting}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleCreateRecord}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color={COLORS.white} size="small" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Add</Text>
+                )}
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
-              onPress={handleCreateRecord}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <Text style={styles.submitButtonText}>Adding...</Text>
-              ) : (
-                <Text style={styles.submitButtonText}>Add Record</Text>
-              )}
-            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
-    </View>
+      )}
+
+      {viewModalVisible && selectedRecord && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { padding: 0, overflow: 'hidden' }]}>
+            <LinearGradient
+              colors={[COLORS.primary, '#008b83']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.viewModalHeaderGradient}
+            >
+              <View style={styles.viewModalHeaderContent}>
+                <View style={styles.viewModalIconContainer}>
+                  <Icon
+                    name={selectedRecord.recordType === 'prescription' ? 'medication' : 'description'}
+                    size={30}
+                    color={COLORS.white}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.viewModalMainTitle} numberOfLines={2}>
+                    {selectedRecord.title}
+                  </Text>
+                  <View style={styles.viewModalBadge}>
+                    <Text style={styles.viewModalBadgeText}>
+                      {selectedRecord.recordType?.toUpperCase().replace('_', ' ')}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setViewModalVisible(false)}
+                  style={styles.closeIconButtonLarge}
+                >
+                  <Icon name="close" size={28} color={COLORS.white} />
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+
+            <ScrollView style={styles.viewModalBody} contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              <View style={styles.viewDetailSection}>
+                <View style={styles.detailTitleRow}>
+                  <Icon name="event" size={18} color={COLORS.primary} />
+                  <Text style={styles.detailLabel}>Record Date</Text>
+                </View>
+                <Text style={styles.detailValue}>
+                  {new Date(selectedRecord.uploadDate || selectedRecord.createdAt).toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </Text>
+              </View>
+
+              <View style={styles.viewDetailSection}>
+                <View style={styles.detailTitleRow}>
+                  <Icon name="subject" size={18} color={COLORS.primary} />
+                  <Text style={styles.detailLabel}>Description & Instructions</Text>
+                </View>
+                <View style={styles.descriptionContainer}>
+                  <Text style={styles.detailDescription}>
+                    {selectedRecord.description || 'No additional details provided for this record.'}
+                  </Text>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.viewModalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton, { width: '100%' }]}
+                onPress={() => setViewModalVisible(false)}
+              >
+                <Text style={styles.saveButtonText}>Back to Records</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+    </SafeAreaView>
   );
 };
 
@@ -327,268 +329,293 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    padding: SIZES.lg,
+    backgroundColor: COLORS.white,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: SIZES.fontLg,
     fontWeight: 'bold',
     color: COLORS.text,
   },
-  addButtonHeader: {
+  addButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.primary,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  filterContainer: {
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  filterContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  filterButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  filterButtonText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    fontWeight: '500',
-  },
-  filterButtonTextActive: {
-    color: COLORS.surface,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
+  listContent: {
+    padding: SIZES.lg,
+    flexGrow: 1,
+    paddingBottom: 100,
   },
   recordCard: {
-    backgroundColor: COLORS.surface,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  recordHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radiusMd,
+    padding: 15,
     marginBottom: 12,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 1,
   },
   recordIcon: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
+    borderRadius: 12,
     alignItems: 'center',
-    marginRight: 12,
+    justifyContent: 'center',
+    marginRight: 15,
   },
   recordInfo: {
     flex: 1,
   },
   recordTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: SIZES.fontMd,
+    fontWeight: 'bold',
     color: COLORS.text,
-    marginBottom: 4,
-  },
-  recordType: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  recordDescription: {
-    fontSize: 14,
-    color: COLORS.text,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  recordFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
   recordDate: {
     fontSize: 12,
     color: COLORS.textSecondary,
+    marginTop: 2,
   },
-  fileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    flex: 1,
-    marginLeft: 12,
+  recordTypeTag: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    textTransform: 'uppercase',
   },
-  fileName: {
+  recordDescriptionSnippet: {
     fontSize: 12,
     color: COLORS.textSecondary,
-    flex: 1,
+    marginTop: 4,
   },
-  emptyState: {
+  viewButton: {
+    padding: 8,
+  },
+  viewModalHeaderGradient: {
+    paddingTop: 30,
+    paddingBottom: 25,
+    paddingHorizontal: 20,
+  },
+  viewModalHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  viewModalIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewModalMainTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.white,
+    marginBottom: 5,
+  },
+  viewModalBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  viewModalBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: COLORS.white,
+    letterSpacing: 0.5,
+  },
+  closeIconButtonLarge: {
+    position: 'absolute',
+    top: -10,
+    right: -5,
+    padding: 10,
+  },
+  viewModalBody: {
+    maxHeight: 400,
+  },
+  viewModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: COLORS.white,
+  },
+  detailTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  descriptionContainer: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radiusMd,
+    padding: 15,
+    marginTop: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  viewDetailSection: {
+    marginBottom: 25,
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  detailValue: {
+    fontSize: SIZES.fontMd,
+    color: COLORS.text,
+    fontWeight: '600',
+    paddingLeft: 26,
+  },
+  detailDescription: {
+    fontSize: SIZES.fontMd,
+    color: COLORS.text,
+    lineHeight: 24,
+  },
+  loading: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
   },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 40,
-  },
-  addButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 25,
-  },
-  modal: {
-    margin: 0,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyState: {
     alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    marginTop: 100,
   },
-  modalTitle: {
-    fontSize: 20,
+  emptyText: {
+    fontSize: SIZES.fontLg,
     fontWeight: 'bold',
     color: COLORS.text,
+    marginTop: 20,
   },
-  form: {
-    gap: 16,
+  emptySubtext: {
+    fontSize: SIZES.fontSm,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 40,
   },
-  label: {
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 1000,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radiusLg,
+    padding: SIZES.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: SIZES.fontLg,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 20,
+  },
+  modalInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radiusMd,
+    padding: 15,
+    fontSize: SIZES.fontMd,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 20,
+    color: COLORS.text,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: SIZES.radiusMd,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: COLORS.background,
+  },
+  saveButton: {
+    backgroundColor: COLORS.primary,
+  },
+  cancelButtonText: {
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  saveButtonText: {
+    color: COLORS.white,
+    fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.text,
-    marginBottom: 8,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 12,
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 50,
-    color: COLORS.text,
-    fontSize: 16,
+    marginBottom: 10,
   },
   typeSelector: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 20,
   },
   typeOption: {
+    paddingVertical: 6,
     paddingHorizontal: 12,
-    paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  typeOptionActive: {
-    backgroundColor: COLORS.primary,
+  selectedTypeOption: {
+    backgroundColor: COLORS.primaryLight,
     borderColor: COLORS.primary,
   },
   typeOptionText: {
     fontSize: 12,
     color: COLORS.textSecondary,
-    fontWeight: '500',
   },
-  typeOptionTextActive: {
-    color: COLORS.surface,
-  },
-  textAreaContainer: {
-    paddingVertical: 12,
-  },
-  textArea: {
-    flex: 1,
-    height: 100,
-    color: COLORS.text,
-    fontSize: 16,
-  },
-  submitButton: {
-    backgroundColor: COLORS.primary,
-    height: 55,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 10,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    color: COLORS.surface,
-    fontSize: 18,
+  selectedTypeOptionText: {
+    color: COLORS.primary,
     fontWeight: 'bold',
   },
 });

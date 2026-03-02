@@ -1,4 +1,4 @@
-const db = require('../utils/db');
+const MedicalRecord = require('../models/MedicalRecord');
 
 // @desc    Get all medical records for a user
 // @route   GET /api/records
@@ -8,25 +8,25 @@ const getRecords = async (req, res) => {
     const { type, page = 1, limit = 10 } = req.query;
 
     // Get all records for user
-    let records = await db.find('records', { user: req.user.id });
-
-    // Filter by type
+    // Build query
+    const query = { user: req.user.id };
     if (type) {
-      records = records.filter(r => r.recordType === type);
+      query.recordType = type;
     }
 
-    // Sort by createdAt desc
-    records.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
     // Pagination
-    const total = records.length;
-    const startIndex = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedRecords = records.slice(startIndex, startIndex + parseInt(limit));
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const total = await MedicalRecord.countDocuments(query);
+    const records = await MedicalRecord.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
 
     res.status(200).json({
       success: true,
       data: {
-        records: paginatedRecords,
+        records,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -50,7 +50,7 @@ const getRecords = async (req, res) => {
 // @access  Private
 const getRecord = async (req, res) => {
   try {
-    const record = await db.findOne('records', { _id: req.params.id, user: req.user.id });
+    const record = await MedicalRecord.findOne({ _id: req.params.id, user: req.user.id });
 
     if (!record) {
       return res.status(404).json({
@@ -80,6 +80,8 @@ const getRecord = async (req, res) => {
 // @access  Private
 const createRecord = async (req, res) => {
   try {
+    console.log('--- CREATE RECORD REQUEST RECEIVED ---');
+    console.log('Request Body:', JSON.stringify(req.body, null, 2));
     const { title, description, recordType, fileUrl, fileName, fileSize } = req.body;
 
     // Validate required fields
@@ -91,7 +93,7 @@ const createRecord = async (req, res) => {
     }
 
     // Create new record
-    const record = await db.create('records', {
+    const record = new MedicalRecord({
       user: req.user.id,
       title,
       description,
@@ -100,6 +102,8 @@ const createRecord = async (req, res) => {
       fileName: fileName || '',
       fileSize: fileSize || 0
     });
+
+    await record.save();
 
     res.status(201).json({
       success: true,
@@ -126,23 +130,11 @@ const updateRecord = async (req, res) => {
     const recordId = req.params.id;
     const { title, description, recordType, fileUrl, fileName, fileSize } = req.body;
 
-    const record = await db.findOne('records', { _id: recordId, user: req.user.id });
-    if (!record) {
-      return res.status(404).json({
-        success: false,
-        message: 'Medical record not found'
-      });
-    }
-
-    const update = {};
-    if (title) update.title = title;
-    if (description) update.description = description;
-    if (recordType) update.recordType = recordType;
-    if (fileUrl !== undefined) update.fileUrl = fileUrl;
-    if (fileName !== undefined) update.fileName = fileName;
-    if (fileSize !== undefined) update.fileSize = fileSize;
-
-    const updated = await db.findByIdAndUpdate('records', recordId, update);
+    const updated = await MedicalRecord.findOneAndUpdate(
+      { _id: recordId, user: req.user.id },
+      { $set: req.body },
+      { new: true }
+    );
 
     res.status(200).json({
       success: true,
@@ -166,7 +158,7 @@ const updateRecord = async (req, res) => {
 // @access  Private
 const deleteRecord = async (req, res) => {
   try {
-    const deleted = await db.findByIdAndDelete('records', req.params.id);
+    const deleted = await MedicalRecord.findOneAndDelete({ _id: req.params.id, user: req.user.id });
     if (!deleted) {
       return res.status(404).json({
         success: false,
@@ -193,23 +185,17 @@ const deleteRecord = async (req, res) => {
 // @access  Private
 const getRecordStats = async (req, res) => {
   try {
-    const records = await db.find('records', { user: req.user.id });
-
-    // Manual aggregation
-    const typeCounts = {};
-    records.forEach(r => {
-      typeCounts[r.recordType] = (typeCounts[r.recordType] || 0) + 1;
-    });
-
-    const typeBreakdown = Object.keys(typeCounts).map(type => ({
-      type,
-      count: typeCounts[type]
-    }));
+    const totalRecords = await MedicalRecord.countDocuments({ user: req.user.id });
+    const typeBreakdown = await MedicalRecord.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(req.user.id) } },
+      { $group: { _id: '$recordType', count: { $sum: 1 } } },
+      { $project: { type: '$_id', count: 1, _id: 0 } }
+    ]);
 
     res.status(200).json({
       success: true,
       data: {
-        totalRecords: records.length,
+        totalRecords,
         typeBreakdown
       }
     });

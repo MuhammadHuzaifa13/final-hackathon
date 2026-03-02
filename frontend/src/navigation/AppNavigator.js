@@ -1,7 +1,7 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { MaterialIcons as Icon } from '@expo/vector-icons';
 
 import SplashScreen from '../screens/SplashScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
@@ -13,6 +13,14 @@ import BookAppointmentScreen from '../screens/BookAppointmentScreen';
 import AppointmentHistoryScreen from '../screens/AppointmentHistoryScreen';
 import MedicalRecordsScreen from '../screens/MedicalRecordsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import SymptomCheckerScreen from '../screens/SymptomCheckerScreen';
+import MedicationTrackerScreen from '../screens/MedicationTrackerScreen';
+import HealthTrendsScreen from '../screens/HealthTrendsScreen';
+import ChatListScreen from '../screens/ChatListScreen';
+import ChatDetailScreen from '../screens/ChatDetailScreen';
+import EmergencyScreen from '../screens/EmergencyScreen';
+import NotificationScreen from '../screens/NotificationScreen';
+import DoctorScheduleScreen from '../screens/DoctorScheduleScreen';
 import { COLORS, ROUTES } from '../constants';
 
 const Stack = createStackNavigator();
@@ -97,7 +105,7 @@ const AppNavigator = () => {
         name={ROUTES.BOOK_APPOINTMENT}
         component={BookAppointmentScreen}
         options={{
-          headerShown: true,
+          headerShown: false,
           title: 'Book Appointment',
           headerStyle: {
             backgroundColor: COLORS.primary,
@@ -109,7 +117,7 @@ const AppNavigator = () => {
         name={ROUTES.APPOINTMENT_HISTORY}
         component={AppointmentHistoryScreen}
         options={{
-          headerShown: true,
+          headerShown: false,
           title: 'Appointment History',
           headerStyle: {
             backgroundColor: COLORS.primary,
@@ -117,6 +125,16 @@ const AppNavigator = () => {
           headerTintColor: COLORS.surface,
         }}
       />
+
+      {/* New Expansion Screens */}
+      <Stack.Screen name={ROUTES.SYMPTOM_CHECKER} component={SymptomCheckerScreen} />
+      <Stack.Screen name={ROUTES.MEDICATION_TRACKER} component={MedicationTrackerScreen} />
+      <Stack.Screen name={ROUTES.HEALTH_TRENDS} component={HealthTrendsScreen} />
+      <Stack.Screen name={ROUTES.CHAT_LIST} component={ChatListScreen} />
+      <Stack.Screen name={ROUTES.CHAT_DETAIL} component={ChatDetailScreen} />
+      <Stack.Screen name={ROUTES.EMERGENCY} component={EmergencyScreen} />
+      <Stack.Screen name={ROUTES.NOTIFICATIONS} component={NotificationScreen} />
+      <Stack.Screen name={ROUTES.DOCTOR_SCHEDULE} component={DoctorScheduleScreen} />
     </Stack.Navigator>
   );
 };

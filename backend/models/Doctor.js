@@ -56,9 +56,9 @@ const doctorSchema = new mongoose.Schema({
 });
 
 // Update the updatedAt field on save
-doctorSchema.pre('save', function(next) {
+// Update the updatedAt field on save
+doctorSchema.pre('save', async function () {
   this.updatedAt = Date.now();
-  next();
 });
 
 module.exports = mongoose.model('Doctor', doctorSchema);

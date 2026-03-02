@@ -4,49 +4,50 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const db = require('./utils/db');
-
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  process.exit(1);
 });
 
 const authRoutes = require('./routes/auth');
 const appointmentRoutes = require('./routes/appointments');
 const userRoutes = require('./routes/user');
 const recordRoutes = require('./routes/records');
+const symptomRoutes = require('./routes/symptomRoutes');
+const medicationRoutes = require('./routes/medicationRoutes');
+const vitalsRoutes = require('./routes/vitalsRoutes');
+const messageRoutes = require('./routes/messageRoutes');
+const emergencyRoutes = require('./routes/emergencyRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+console.log('--- STARTING CLEAN BACKEND INSTANCE ---');
 
-// Rate limiting
+// 1. CORS - MUST BE FIRST
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// 2. Security
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+}));
+
+// 3. Rate Limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 1000
 });
 app.use(limiter);
 
-// CORS configuration
-const allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : ['http://localhost:3000'];
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
-
-// Body parser middleware
+// 4. Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -55,15 +56,21 @@ app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/records', recordRoutes);
+app.use('/api/symptoms', symptomRoutes);
+app.use('/api/medications', medicationRoutes);
+app.use('/api/vitals', vitalsRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/emergency', emergencyRoutes);
+app.use('/api/notifications', notificationRoutes);
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Server is running' });
 });
 
-// Error handling middleware
+// Error handling
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('GLOBAL ERROR:', err.stack);
   res.status(500).json({
     success: false,
     message: 'Something went wrong!',
@@ -71,27 +78,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
-});
-
+const mongoose = require('mongoose');
+const Doctor = require('./models/Doctor');
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    // Wait for DB initialization
-    await db.init();
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('MongoDB Connected Successfully');
 
     // Seed doctors if empty
-    const doctors = await db.read('doctors');
-    if (doctors.length === 0) {
+    const doctorsCount = await Doctor.countDocuments();
+    if (doctorsCount === 0) {
       const initialDoctors = [
         {
-          _id: 'doc1',
           name: 'Dr. Sarah Wilson',
           specialization: 'Cardiologist',
           email: 'sarah.wilson@medicare.com',
@@ -101,7 +101,6 @@ const startServer = async () => {
           isActive: true
         },
         {
-          _id: 'doc2',
           name: 'Dr. James Miller',
           specialization: 'Dermatologist',
           email: 'james.miller@medicare.com',
@@ -111,7 +110,6 @@ const startServer = async () => {
           isActive: true
         },
         {
-          _id: 'doc3',
           name: 'Dr. Emily Chen',
           specialization: 'Pediatrician',
           email: 'emily.chen@medicare.com',
@@ -119,24 +117,58 @@ const startServer = async () => {
           availableDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
           availableTimeSlots: [{ start: '08:00', end: '12:00' }],
           isActive: true
+        },
+        {
+          name: 'Dr. Michael Brown',
+          specialization: 'Neurologist',
+          email: 'michael.brown@medicare.com',
+          phone: '123-456-7893',
+          availableDays: ['Monday', 'Thursday'],
+          availableTimeSlots: [{ start: '09:00', end: '15:00' }],
+          isActive: true
+        },
+        {
+          name: 'Dr. Lisa Davis',
+          specialization: 'Gynecologist',
+          email: 'lisa.davis@medicare.com',
+          phone: '123-456-7894',
+          availableDays: ['Wednesday', 'Friday', 'Saturday'],
+          availableTimeSlots: [{ start: '10:00', end: '18:00' }],
+          isActive: true
+        },
+        {
+          name: 'Dr. Robert Garcia',
+          specialization: 'Orthopedic',
+          email: 'robert.garcia@medicare.com',
+          phone: '123-456-7895',
+          availableDays: ['Monday', 'Tuesday', 'Friday'],
+          availableTimeSlots: [{ start: '08:30', end: '16:30' }],
+          isActive: true
+        },
+        {
+          name: 'Dr. Jennifer Kim',
+          specialization: 'Ophthalmologist',
+          email: 'jennifer.kim@medicare.com',
+          phone: '123-456-7896',
+          availableDays: ['Tuesday', 'Wednesday', 'Thursday'],
+          availableTimeSlots: [{ start: '09:30', end: '17:30' }],
+          isActive: true
+        },
+        {
+          name: 'Dr. William Taylor',
+          specialization: 'Oncologist',
+          email: 'william.taylor@medicare.com',
+          phone: '123-456-7897',
+          availableDays: ['Thursday', 'Friday'],
+          availableTimeSlots: [{ start: '11:00', end: '19:00' }],
+          isActive: true
         }
       ];
-      await db.write('doctors', initialDoctors);
+      await Doctor.insertMany(initialDoctors);
       console.log('Doctors seeded successfully');
     }
 
-    const server = app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
-
-    process.on('SIGINT', () => {
-      console.log('Shutting down server...');
-      server.close(() => {
-        console.log('Server process terminated');
-        process.exit(0);
-      });
-    });
-
+    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);

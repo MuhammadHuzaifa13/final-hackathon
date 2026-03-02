@@ -6,290 +6,317 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  SafeAreaView,
   Alert,
-  Modal,
-  TextInput,
+  ActivityIndicator,
+  Dimensions,
+  Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { MaterialIcons as Icon } from '@expo/vector-icons';
+import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import { appointmentService } from '../services';
-import { dateUtils } from '../utils';
-import { COLORS, APPOINTMENT_STATUS } from '../constants';
+import { COLORS, ROUTES, SIZES, APPOINTMENT_STATUS } from '../constants';
 
-const BookAppointmentScreen = ({ navigation }) => {
+const { width } = Dimensions.get('window');
+
+const BookAppointmentScreen = ({ navigation, route }) => {
   const [doctors, setDoctors] = useState([]);
-  const [selectedDoctor, setSelectedDoctor] = useState(null);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [availableSlots, setAvailableSlots] = useState([]);
-  const [selectedSlot, setSelectedSlot] = useState('');
   const [loading, setLoading] = useState(true);
-  const [bookingLoading, setBookingLoading] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedTime, setSelectedTime] = useState(null);
+
+  // Focus management for Web to resolve aria-hidden/focus conflict
+  const screenRef = React.useRef(null);
 
   useEffect(() => {
     loadDoctors();
-  }, []);
+    // Default to tomorrow to avoid "future date" validation errors
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateStr = tomorrow.toISOString().split('T')[0];
+    setSelectedDate(dateStr);
 
-  useEffect(() => {
-    if (selectedDoctor && selectedDate) {
-      loadAvailableSlots();
+    // Force focus into the screen on mount for Web
+    if (Platform.OS === 'web' && screenRef.current) {
+      const timer = setTimeout(() => {
+        screenRef.current.focus?.();
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, [selectedDoctor, selectedDate]);
+  }, []);
 
   const loadDoctors = async () => {
     try {
       const response = await appointmentService.getAvailableDoctors();
-      setDoctors(response.data.doctors);
+      const docs = response.doctors || response?.data?.doctors || response || [];
+      const doctorsArray = Array.isArray(docs) ? docs : [];
+      setDoctors(doctorsArray);
+
+      // Handle parameter from DoctorScheduleScreen
+      if (route.params?.doctorId && doctorsArray.length > 0) {
+        const doc = doctorsArray.find(d => d._id === route.params.doctorId);
+        if (doc) setSelectedDoctor(doc);
+      }
     } catch (error) {
       console.error('Error loading doctors:', error);
-      Alert.alert('Error', 'Failed to load available doctors');
+      Alert.alert('Error', 'Failed to load doctors list');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadAvailableSlots = async () => {
+  const getAvailableDoctorsForDay = () => {
+    if (!selectedDate) return [];
+    const date = new Date(selectedDate);
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+
+    return doctors.filter(doctor =>
+      doctor.availableDays && doctor.availableDays.includes(dayName)
+    );
+  };
+
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  useEffect(() => {
+    if (selectedDoctor && selectedDate) {
+      loadSlots();
+    }
+  }, [selectedDoctor, selectedDate]);
+
+  const loadSlots = async () => {
+    setLoadingSlots(true);
     try {
-      const response = await appointmentService.getAvailableSlots(
-        selectedDoctor._id,
-        selectedDate
-      );
-      setAvailableSlots(response.data.availableSlots);
+      const response = await appointmentService.getAvailableSlots(selectedDoctor._id, selectedDate);
+      const slotsData = response?.data?.availableSlots || response?.availableSlots || [];
+
+      // Convert string times (e.g., "09:00") to UI format { time: "09:00 AM", value: "09:00" }
+      const formattedSlots = slotsData.map(slotStr => {
+        const [hour, min] = slotStr.split(':');
+        const h = parseInt(hour);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const displayHour = h % 12 || 12;
+        return {
+          time: `${displayHour}:${min} ${ampm}`,
+          value: slotStr
+        };
+      });
+
+      setAvailableSlots(formattedSlots);
     } catch (error) {
       console.error('Error loading slots:', error);
-      setAvailableSlots([]);
+      // Fallback to static slots if API fails
+      setAvailableSlots([
+        { time: '09:00 AM', value: '09:00' },
+        { time: '10:00 AM', value: '10:00' },
+        { time: '11:00 AM', value: '11:00' },
+        { time: '02:00 PM', value: '14:00' },
+        { time: '03:00 PM', value: '15:00' },
+      ]);
+    } finally {
+      setLoadingSlots(false);
     }
-  };
-
-  const handleDoctorSelect = (doctor) => {
-    setSelectedDoctor(doctor);
-    setSelectedDate('');
-    setSelectedSlot('');
-    setAvailableSlots([]);
-  };
-
-  const handleDateSelect = (date) => {
-    setSelectedDate(date);
-    setSelectedSlot('');
-  };
-
-  const handleSlotSelect = (slot) => {
-    setSelectedSlot(slot);
   };
 
   const handleBookAppointment = async () => {
-    if (!selectedDoctor || !selectedDate || !selectedSlot) {
-      Alert.alert('Error', 'Please select doctor, date, and time slot');
+    if (!selectedDoctor || !selectedDate || !selectedTime) {
+      Alert.alert('Selection Required', 'Please select a doctor, date, and time slot.');
       return;
     }
 
-    setBookingLoading(true);
+    setSubmitting(true);
     try {
-      await appointmentService.bookAppointment({
+      const appointmentData = {
         doctorId: selectedDoctor._id,
         date: selectedDate,
-        time: selectedSlot,
-        notes: notes,
-      });
+        time: selectedTime,
+      };
 
-      Alert.alert(
-        'Success',
-        'Appointment booked successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      await appointmentService.bookAppointment(appointmentData);
+
+      if (Platform.OS === 'web') {
+        alert('Success! Your appointment has been booked successfully.');
+        navigation.replace(ROUTES.MAIN);
+      } else {
+        Alert.alert(
+          'Success!',
+          'Your appointment has been booked successfully.',
+          [{ text: 'Great', onPress: () => navigation.replace(ROUTES.MAIN) }]
+        );
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to book appointment');
+      const message = error.response?.data?.message || error.message || 'Failed to book appointment. Please try another slot.';
+      if (Platform.OS === 'web') {
+        alert('Booking Error: ' + message);
+      } else {
+        Alert.alert('Booking Error', message);
+      }
     } finally {
-      setBookingLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const renderDoctorSelection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Select Your Doctor</Text>
-      {doctors.map((doctor) => (
-        <TouchableOpacity
-          key={doctor._id}
-          style={[
-            styles.doctorCard,
-            selectedDoctor?._id === doctor._id && styles.doctorCardSelected,
-          ]}
-          onPress={() => handleDoctorSelect(doctor)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.doctorInfo}>
-            <Text style={styles.doctorName}>{doctor.name}</Text>
-            <Text style={styles.specialization}>{doctor.specialization}</Text>
-            <Text style={styles.availability}>
-              Available: {doctor.availableDays.join(', ')}
-            </Text>
-          </View>
-          <View style={styles.doctorRadio}>
-            <View
-              style={[
-                styles.radioOuter,
-                selectedDoctor?._id === doctor._id && styles.radioOuterSelected,
-              ]}
-            >
-              {selectedDoctor?._id === doctor._id && (
-                <View style={styles.radioInner} />
-              )}
-            </View>
-          </View>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-
-  const renderDateSelection = () => {
-    if (!selectedDoctor) return null;
-
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Choose a Date</Text>
-        <TouchableOpacity
-          style={styles.dateSelector}
-          onPress={() => setShowCalendar(true)}
-          activeOpacity={0.7}
-        >
-          <Icon name="calendar-today" size={24} color={COLORS.primary} />
-          <Text style={styles.dateSelectorText}>
-            {selectedDate ? dateUtils.formatDate(selectedDate) : 'Select Date'}
-          </Text>
-          <Icon name="chevron-right" size={20} color={COLORS.textSecondary} />
-        </TouchableOpacity>
-      </View>
-    );
+  const generateDates = () => {
+    const dates = [];
+    const today = new Date();
+    for (let i = 0; i < 14; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      dates.push({
+        full: date.toISOString().split('T')[0],
+        day: date.getDate(),
+        name: date.toLocaleDateString('en-US', { weekday: 'short' }),
+      });
+    }
+    return dates;
   };
 
-  const renderTimeSlots = () => {
-    if (!selectedDate || availableSlots.length === 0) return null;
-
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Available Time Slots</Text>
-        <View style={styles.slotsGrid}>
-          {availableSlots.map((slot) => (
-            <TouchableOpacity
-              key={slot}
-              style={[
-                styles.slotButton,
-                selectedSlot === slot && styles.slotButtonSelected,
-              ]}
-              onPress={() => handleSlotSelect(slot)}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.slotText,
-                  selectedSlot === slot && styles.slotTextSelected,
-                ]}
-              >
-                {dateUtils.formatTime(slot)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
-  };
-
-  const renderNotesSection = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Notes (Optional)</Text>
-      <TextInput
-        style={styles.notesInput}
-        placeholder="Add any notes for your appointment..."
-        value={notes}
-        onChangeText={setNotes}
-        multiline
-        numberOfLines={3}
-      />
-    </View>
-  );
-
-  const renderBookingButton = () => {
-    if (!selectedDoctor || !selectedDate || !selectedSlot) return null;
-
-    return (
-      <View style={styles.bookingSection}>
-        <TouchableOpacity
-          style={[styles.bookButton, bookingLoading && styles.buttonDisabled]}
-          onPress={handleBookAppointment}
-          disabled={bookingLoading}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.bookButtonText}>
-            {bookingLoading ? 'Booking...' : 'Confirm Appointment'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text>Loading available doctors...</Text>
-      </View>
-    );
-  }
+  const filteredDoctors = getAvailableDoctorsForDay();
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
-      
+    <SafeAreaView
+      style={[
+        styles.container,
+        Platform.OS === 'web' && {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: '100vh',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }
+      ]}
+      ref={screenRef}
+      focusable={true}
+      accessible={true}
+    >
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Schedule Appointment</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       <ScrollView
+        showsVerticalScrollIndicator={false}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
       >
-        {renderDoctorSelection()}
-        {renderDateSelection()}
-        {renderTimeSlots()}
-        {renderNotesSection()}
-        {renderBookingButton()}
+        <View style={styles.content}>
+
+          <Text style={styles.sectionTitle}>Choose A Date</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateList}>
+            {generateDates().map((date, index) => (
+              <TouchableOpacity
+                key={date.full}
+                style={[
+                  styles.dateCard,
+                  selectedDate === date.full && styles.selectedDateCard
+                ]}
+                onPress={() => {
+                  setSelectedDate(date.full);
+                  setSelectedDoctor(null);
+                  setSelectedTime(null);
+                }}
+              >
+                <Text style={[styles.dateName, selectedDate === date.full && styles.selectedDateText]}>
+                  {date.name}
+                </Text>
+                <Text style={[styles.dateDay, selectedDate === date.full && styles.selectedDateText]}>
+                  {date.day}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={styles.sectionTitle}>Doctors Available on {selectedDate ? new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long' }) : 'this day'}</Text>
+          {filteredDoctors.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.doctorList}>
+              {filteredDoctors.map((doctor) => (
+                <TouchableOpacity
+                  key={doctor._id}
+                  style={[
+                    styles.doctorCard,
+                    selectedDoctor?._id === doctor._id && styles.selectedDoctorCard
+                  ]}
+                  onPress={() => {
+                    setSelectedDoctor(doctor);
+                    setSelectedTime(null);
+                  }}
+                >
+                  <View style={styles.doctorAvatar}>
+                    <Icon name="person" size={40} color={selectedDoctor?._id === doctor._id ? COLORS.white : COLORS.primary} />
+                  </View>
+                  <Text style={[styles.doctorName, selectedDoctor?._id === doctor._id && styles.selectedDoctorText]}>
+                    {doctor.name}
+                  </Text>
+                  <Text style={[styles.doctorSpec, selectedDoctor?._id === doctor._id && styles.selectedDoctorTextSecondary]}>
+                    {doctor.specialization}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.emptyDoctors}>
+              <Icon name="event-busy" size={40} color={COLORS.textTertiary} />
+              <Text style={styles.emptyDoctorsText}>No doctors available on this day.</Text>
+            </View>
+          )}
+
+          <Text style={styles.sectionTitle}>Available Time Slots</Text>
+          {loadingSlots ? (
+            <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
+          ) : availableSlots.length > 0 ? (
+            <View style={styles.timeGrid}>
+              {availableSlots.map((slot, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.timeSlot,
+                    selectedTime === slot.value && styles.selectedTimeSlot
+                  ]}
+                  onPress={() => setSelectedTime(slot.value)}
+                >
+                  <Text style={[styles.timeText, selectedTime === slot.value && styles.selectedTimeText]}>
+                    {slot.time}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.noSlotsText}>
+              {selectedDoctor ? 'No available slots for this doctor on selected date.' : 'Select a doctor to view available slots.'}
+            </Text>
+          )}
+
+          {/* Add spacing at the bottom to ensure last elements are visible above the footer */}
+          <View style={{ height: 100 }} />
+
+        </View>
       </ScrollView>
 
-      {/* Calendar Modal - Simplified for demo */}
-      <Modal
-        visible={showCalendar}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowCalendar(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Date</Text>
-              <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                <Icon name="close" size={24} color={COLORS.text} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.modalText}>
-              Calendar functionality would be implemented here.
-            </Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => {
-                // For demo, select tomorrow's date
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                setSelectedDate(tomorrow.toISOString().split('T')[0]);
-                setShowCalendar(false);
-              }}
-            >
-              <Text style={styles.modalButtonText}>Select Tomorrow</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.bookButton, submitting && styles.disabledButton]}
+          onPress={handleBookAppointment}
+          disabled={submitting}
+        >
+          {submitting ? (
+            <ActivityIndicator color={COLORS.white} />
+          ) : (
+            <Text style={styles.bookButtonText}>Confirm Appointment</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 };
 
@@ -303,205 +330,194 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SIZES.lg,
+    paddingVertical: 15,
+    backgroundColor: COLORS.white,
+  },
+  headerTitle: {
+    fontSize: SIZES.fontLg,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  backButton: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    flexGrow: 1,
+    paddingBottom: 20,
   },
-  section: {
-    marginBottom: 24,
+  content: {
+    padding: SIZES.lg,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: SIZES.fontMd,
+    fontWeight: 'bold',
     color: COLORS.text,
-    marginBottom: 16,
+    marginBottom: 15,
+    marginTop: 10,
   },
-  doctorCard: {
-    backgroundColor: COLORS.surface,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  dateList: {
+    marginBottom: 20,
   },
-  doctorCardSelected: {
-    borderWidth: 2,
-    borderColor: COLORS.primary,
-  },
-  doctorInfo: {
-    flex: 1,
-  },
-  doctorName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  specialization: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  availability: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  doctorRadio: {
-    marginLeft: 12,
-  },
-  radioOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: COLORS.border,
+  dateCard: {
+    width: 60,
+    height: 80,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radiusMd,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  radioOuterSelected: {
+  selectedDateCard: {
+    backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.primary,
+  dateName: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
   },
-  dateSelector: {
-    backgroundColor: COLORS.surface,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  dateSelectorText: {
-    flex: 1,
-    fontSize: 16,
+  dateDay: {
+    fontSize: SIZES.fontLg,
+    fontWeight: 'bold',
     color: COLORS.text,
   },
-  slotsGrid: {
+  selectedDateText: {
+    color: COLORS.white,
+  },
+  doctorList: {
+    marginBottom: 20,
+  },
+  doctorCard: {
+    width: 150,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radiusMd,
+    padding: 15,
+    marginRight: 15,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  selectedDoctorCard: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  doctorAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  doctorName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  doctorSpec: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  selectedDoctorText: {
+    color: COLORS.white,
+  },
+  selectedDoctorTextSecondary: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  timeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 20,
   },
-  slotButton: {
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 8,
+  timeSlot: {
+    width: '48%',
+    height: 50,
+    backgroundColor: COLORS.white,
+    borderRadius: SIZES.radiusMd,
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
-    minWidth: 80,
-    alignItems: 'center',
   },
-  slotButtonSelected: {
-    backgroundColor: COLORS.primary,
+  selectedTimeSlot: {
+    backgroundColor: COLORS.primaryLight,
     borderColor: COLORS.primary,
   },
-  slotText: {
+  timeText: {
     fontSize: 14,
     color: COLORS.text,
+    fontWeight: '500',
   },
-  slotTextSelected: {
-    color: COLORS.surface,
+  selectedTimeText: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
   },
-  notesInput: {
-    backgroundColor: COLORS.surface,
-    padding: 16,
-    borderRadius: 12,
-    fontSize: 16,
-    color: COLORS.text,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    textAlignVertical: 'top',
-    minHeight: 80,
-  },
-  bookingSection: {
-    marginTop: 20,
-    marginBottom: 40,
+  footer: {
+    padding: SIZES.lg,
+    backgroundColor: COLORS.white,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
   bookButton: {
     backgroundColor: COLORS.primary,
-    paddingVertical: 16,
-    borderRadius: 25,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  bookButtonText: {
-    color: COLORS.surface,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    height: 56,
+    borderRadius: SIZES.radiusLg,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  modalContent: {
+  bookButtonText: {
+    color: COLORS.white,
+    fontSize: SIZES.fontMd,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  emptyDoctors: {
+    padding: 30,
+    alignItems: 'center',
     backgroundColor: COLORS.surface,
-    padding: 24,
-    borderRadius: 16,
-    margin: 20,
-    maxWidth: 300,
+    borderRadius: SIZES.radiusMd,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  modalText: {
-    fontSize: 16,
+  emptyDoctorsText: {
+    marginTop: 10,
     color: COLORS.textSecondary,
-    marginBottom: 16,
+    fontSize: 14,
+  },
+  noSlotsText: {
     textAlign: 'center',
-  },
-  modalButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    color: COLORS.surface,
-    fontSize: 16,
-    fontWeight: '500',
-  },
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginVertical: 20,
+    fontStyle: 'italic',
+  }
 });
 
 export default BookAppointmentScreen;

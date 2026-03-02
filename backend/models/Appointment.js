@@ -15,7 +15,7 @@ const appointmentSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'Appointment date is required'],
     validate: {
-      validator: function(value) {
+      validator: function (value) {
         return value > new Date();
       },
       message: 'Appointment date must be in the future'
@@ -51,24 +51,24 @@ appointmentSchema.index({ user: 1, date: 1, time: 1 }, { unique: true });
 appointmentSchema.index({ doctor: 1, date: 1, time: 1 }, { unique: true });
 
 // Update the updatedAt field on save
-appointmentSchema.pre('save', function(next) {
+// Update the updatedAt field on save
+appointmentSchema.pre('save', async function () {
   this.updatedAt = Date.now();
-  next();
 });
 
 // Static method to check for appointment clashes
-appointmentSchema.statics.checkClash = async function(doctorId, date, time, excludeAppointmentId = null) {
+appointmentSchema.statics.checkClash = async function (doctorId, date, time, excludeAppointmentId = null) {
   const query = {
     doctor: doctorId,
     date: new Date(date),
     time: time,
     status: { $in: ['confirmed', 'pending'] }
   };
-  
+
   if (excludeAppointmentId) {
     query._id = { $ne: excludeAppointmentId };
   }
-  
+
   const existingAppointment = await this.findOne(query);
   return existingAppointment;
 };

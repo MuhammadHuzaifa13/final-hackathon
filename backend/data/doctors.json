@@ -15,7 +15,8 @@
         "start": "09:00",
         "end": "17:00"
       }
-    ]
+    ],
+    "isActive": true
   },
   {
     "_id": "doc2",
@@ -32,7 +33,8 @@
         "start": "10:00",
         "end": "16:00"
       }
-    ]
+    ],
+    "isActive": true
   },
   {
     "_id": "doc3",
@@ -52,6 +54,7 @@
         "start": "08:00",
         "end": "12:00"
       }
-    ]
+    ],
+    "isActive": true
   }
 ]

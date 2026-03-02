@@ -2,6 +2,7 @@
   base = "backend"
   command = "npm install"
   functions = "functions"
+  publish = "."
 
 [[redirects]]
   from = "/api/*"

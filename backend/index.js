@@ -82,15 +82,19 @@ const mongoose = require('mongoose');
 const Doctor = require('./models/Doctor');
 const PORT = process.env.PORT || 5000;
 
-const startServer = async () => {
+let isConnected = false;
+const connectDB = async () => {
+  if (isConnected) return;
   try {
     await mongoose.connect(process.env.MONGODB_URI);
+    isConnected = true;
     console.log('MongoDB Connected Successfully');
 
     // Seed doctors if empty
     const doctorsCount = await Doctor.countDocuments();
     if (doctorsCount === 0) {
       const initialDoctors = [
+        // ... (existing doctors list)
         {
           name: 'Dr. Sarah Wilson',
           specialization: 'Cardiologist',
@@ -167,12 +171,20 @@ const startServer = async () => {
       await Doctor.insertMany(initialDoctors);
       console.log('Doctors seeded successfully');
     }
-
-    app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
   } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
+    console.error('Failed to connect to DB:', error);
   }
 };
 
-startServer();
+// Middleware to ensure DB connection for serverless
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
+if (process.env.NODE_ENV !== 'production' || !process.env.NETLIFY) {
+  app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+}
+
+module.exports = app;
+module.exports.handler = require('serverless-http')(app);

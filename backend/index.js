@@ -103,23 +103,40 @@ const mongoose = require('mongoose');
 const Doctor = require('./models/Doctor');
 const PORT = process.env.PORT || 5000;
 
+// Global Mongoose settings for serverless
+mongoose.set('bufferCommands', false);
+mongoose.set('bufferTimeoutMS', 5000);
+
 let isConnected = false;
+
+// Listen for connection events
+mongoose.connection.on('connected', () => console.log('Mongoose connected to DB'));
+mongoose.connection.on('error', (err) => console.error('Mongoose connection error:', err));
+mongoose.connection.on('disconnected', () => {
+  console.log('Mongoose disconnected');
+  isConnected = false;
+});
+
 const connectDB = async () => {
   if (isConnected && mongoose.connection.readyState === 1) return;
 
   console.log('Attempting to connect to MongoDB...');
-  if (!process.env.MONGODB_URI) {
+  const uri = (process.env.MONGODB_URI || '').trim();
+
+  if (!uri) {
     console.error('CRITICAL: MONGODB_URI is not defined in environment variables');
     return;
   }
 
   try {
-    await mongoose.connect(process.env.MONGODB_URI, {
+    // Force direct connection behavior
+    await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 5000,
-      bufferCommands: false, // Disable buffering for serverless
+      connectTimeoutMS: 10000,
+      heartbeatFrequencyMS: 2000,
     });
     isConnected = true;
-    console.log('MongoDB Connected Successfully');
+    console.log('--- MongoDB Connected Successfully ---');
 
     // Seed doctors if empty
     const doctorsCount = await Doctor.countDocuments();
@@ -202,7 +219,11 @@ const connectDB = async () => {
       console.log('Doctors seeded successfully');
     }
   } catch (error) {
-    console.error('Failed to connect to DB:', error);
+    console.error('CRITICAL DB CONNECTION FAILURE:', {
+      message: error.message,
+      code: error.code,
+      name: error.name
+    });
     throw error;
   }
 };
@@ -210,10 +231,16 @@ const connectDB = async () => {
 // Middleware to ensure DB connection for serverless
 app.use(async (req, res, next) => {
   try {
+    console.log(`Incoming request: ${req.method} ${req.url}`);
     await connectDB();
     next();
   } catch (err) {
-    res.status(500).json({ success: false, message: "Database connection error" });
+    console.error('Middleware DB Error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: "Database connection failed",
+      error: err.message
+    });
   }
 });
 

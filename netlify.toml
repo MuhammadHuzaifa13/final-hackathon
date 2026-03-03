@@ -1,10 +1,25 @@
+# [GCP-style] Netlify Configuration
+# This file tells Netlify how to build and where to find the functions
+
 [build]
+  # The directory where the build command should run
   base = "backend"
+  # The command to install dependencies
   command = "npm install"
-  functions = "functions"
+  # The directory that contains the deployable assets
   publish = "."
+  # The directory where your serverless functions are located
+  functions = "functions"
 
 [[redirects]]
+  # Route all API calls to the 'index' function, preserving the /api prefix
   from = "/api/*"
-  to = "/.netlify/functions/index/:splat"
+  to = "/.netlify/functions/index/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  # Fallback for the root path
+  from = "/"
+  to = "/.netlify/functions/index"
   status = 200

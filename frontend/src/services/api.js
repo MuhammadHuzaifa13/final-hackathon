@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { storage, STORAGE_KEYS } from '../utils';
 
-const API_BASE_URL = 'http://192.168.1.47:5000/api';
+const API_BASE_URL = 'https://medicareeapp.netlify.app/api';
 
 // Create axios instance
 const api = axios.create({

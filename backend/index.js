@@ -40,14 +40,17 @@ app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
 
+const isNetlify = process.env.NETLIFY === 'true' || !!process.env.LAMBDA_TASK_ROOT;
+
 // 3. Rate Limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
-  validate: { trustProxy: false } // Disable IP validation for serverless
-});
-if (!process.env.NETLIFY) {
+if (!isNetlify) {
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 1000,
+  });
   app.use(limiter);
+} else {
+  console.log('--- RUNNING IN NETLIFY ENVIRONMENT ---');
 }
 
 // 4. Body parsers
@@ -80,8 +83,8 @@ app.use((err, req, res, next) => {
   console.error('GLOBAL ERROR:', err.stack);
   res.status(500).json({
     success: false,
-    message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: 'Server error!',
+    error: err.message
   });
 });
 
@@ -91,9 +94,18 @@ const PORT = process.env.PORT || 5000;
 
 let isConnected = false;
 const connectDB = async () => {
-  if (isConnected) return;
+  if (isConnected && mongoose.connection.readyState === 1) return;
+
+  console.log('Attempting to connect to MongoDB...');
+  if (!process.env.MONGODB_URI) {
+    console.error('CRITICAL: MONGODB_URI is not defined in environment variables');
+    return;
+  }
+
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+    });
     isConnected = true;
     console.log('MongoDB Connected Successfully');
 
@@ -101,7 +113,6 @@ const connectDB = async () => {
     const doctorsCount = await Doctor.countDocuments();
     if (doctorsCount === 0) {
       const initialDoctors = [
-        // ... (existing doctors list)
         {
           name: 'Dr. Sarah Wilson',
           specialization: 'Cardiologist',
@@ -180,16 +191,21 @@ const connectDB = async () => {
     }
   } catch (error) {
     console.error('Failed to connect to DB:', error);
+    throw error;
   }
 };
 
 // Middleware to ensure DB connection for serverless
 app.use(async (req, res, next) => {
-  await connectDB();
-  next();
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Database connection error" });
+  }
 });
 
-if (process.env.NODE_ENV !== 'production' || !process.env.NETLIFY) {
+if (!isNetlify) {
   app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
 }
 

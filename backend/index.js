@@ -74,6 +74,17 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'API is running' });
 });
 
+// TEMPORARY DEBUG ENDPOINT - WILL BE REMOVED
+app.get('/api/debug-env', (req, res) => {
+  res.status(200).json({
+    NETLIFY: process.env.NETLIFY,
+    MONGODB_URI_EXISTS: !!process.env.MONGODB_URI,
+    MONGODB_URI_PREFIX: process.env.MONGODB_URI ? process.env.MONGODB_URI.substring(0, 15) + '...' : 'NONE',
+    JWT_SECRET_EXISTS: !!process.env.JWT_SECRET,
+    NODE_ENV: process.env.NODE_ENV,
+  });
+});
+
 app.get('/', (req, res) => {
   res.send('Medical Backend API is Live');
 });

@@ -67,8 +67,12 @@ app.use('/api/emergency', emergencyRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 // Health check
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', message: 'Server is running' });
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'API is running' });
+});
+
+app.get('/', (req, res) => {
+  res.send('Medical Backend API is Live');
 });
 
 // Error handling

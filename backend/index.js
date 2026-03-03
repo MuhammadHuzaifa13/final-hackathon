@@ -74,17 +74,6 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'API is running' });
 });
 
-// TEMPORARY DEBUG ENDPOINT - WILL BE REMOVED
-app.get('/api/debug-env', (req, res) => {
-  res.status(200).json({
-    NETLIFY: process.env.NETLIFY,
-    MONGODB_URI_EXISTS: !!process.env.MONGODB_URI,
-    MONGODB_URI_PREFIX: process.env.MONGODB_URI ? process.env.MONGODB_URI.substring(0, 15) + '...' : 'NONE',
-    JWT_SECRET_EXISTS: !!process.env.JWT_SECRET,
-    NODE_ENV: process.env.NODE_ENV,
-  });
-});
-
 app.get('/', (req, res) => {
   res.send('Medical Backend API is Live');
 });
@@ -103,9 +92,8 @@ const mongoose = require('mongoose');
 const Doctor = require('./models/Doctor');
 const PORT = process.env.PORT || 5000;
 
-// Global Mongoose settings for serverless
+// Mongoose settings
 mongoose.set('bufferCommands', false);
-mongoose.set('bufferTimeoutMS', 5000);
 
 let isConnected = false;
 
@@ -129,12 +117,7 @@ const connectDB = async () => {
   }
 
   try {
-    // Force direct connection behavior
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 10000,
-      heartbeatFrequencyMS: 2000,
-    });
+    await mongoose.connect(uri);
     isConnected = true;
     console.log('--- MongoDB Connected Successfully ---');
 
@@ -219,11 +202,7 @@ const connectDB = async () => {
       console.log('Doctors seeded successfully');
     }
   } catch (error) {
-    console.error('CRITICAL DB CONNECTION FAILURE:', {
-      message: error.message,
-      code: error.code,
-      name: error.name
-    });
+    console.error('CRITICAL DB CONNECTION FAILURE:', error.message);
     throw error;
   }
 };
@@ -231,7 +210,6 @@ const connectDB = async () => {
 // Middleware to ensure DB connection for serverless
 app.use(async (req, res, next) => {
   try {
-    console.log(`Incoming request: ${req.method} ${req.url}`);
     await connectDB();
     next();
   } catch (err) {

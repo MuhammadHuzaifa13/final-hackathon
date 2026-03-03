@@ -43,9 +43,12 @@ app.use(helmet({
 // 3. Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000
+  max: 1000,
+  validate: { trustProxy: false } // Disable IP validation for serverless
 });
-app.use(limiter);
+if (!process.env.NETLIFY) {
+  app.use(limiter);
+}
 
 // 4. Body parsers
 app.use(express.json({ limit: '10mb' }));
